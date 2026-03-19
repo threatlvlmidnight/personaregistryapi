@@ -219,6 +219,13 @@
                 <label>Tunnel Target URL</label>
                 <input type="text" id="tunnelTargetUrl" placeholder="http://127.0.0.1:8000" value="http://127.0.0.1:8000">
             </div>
+            <div class="form-group" style="margin-bottom: 10px;">
+                <label>Current Tunnel URL</label>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
+                    <input type="text" id="tunnelPublicUrl" placeholder="No tunnel URL yet" readonly>
+                    <button type="button" class="secondary" style="min-width: 140px;" onclick="copyTunnelUrl()">Copy URL</button>
+                </div>
+            </div>
             <div class="button-group">
                 <button onclick="startServerFromUi()">Start Server</button>
                 <button class="secondary" onclick="reloadServerFromUi()">Reload Server</button>
@@ -587,6 +594,7 @@ Rules:
         let apiBase = 'http://localhost:8000';
         let serverStatusIntervalId = null;
         let currentEditingPersonaId = null;
+        let currentTunnelUrl = '';
 
         function setServerStatus(state, text) {
             const badge = document.getElementById('serverStatusBadge');
@@ -622,6 +630,36 @@ Rules:
             statusText.textContent = text;
         }
 
+        function setTunnelPublicUrl(url) {
+            currentTunnelUrl = url || '';
+            const tunnelInput = document.getElementById('tunnelPublicUrl');
+            if (!tunnelInput) {
+                return;
+            }
+            tunnelInput.value = currentTunnelUrl;
+            tunnelInput.placeholder = currentTunnelUrl ? '' : 'No tunnel URL yet';
+        }
+
+        async function copyTunnelUrl() {
+            if (!currentTunnelUrl) {
+                displayOutput('serverOutput', 'No tunnel URL available to copy yet.', true);
+                return;
+            }
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(currentTunnelUrl);
+                } else {
+                    const input = document.getElementById('tunnelPublicUrl');
+                    input.focus();
+                    input.select();
+                    document.execCommand('copy');
+                }
+                displayOutput('serverOutput', { message: 'Tunnel URL copied to clipboard.', url: currentTunnelUrl });
+            } catch (error) {
+                displayOutput('serverOutput', `Failed to copy tunnel URL: ${error.message}`, true);
+            }
+        }
+
         async function refreshServerStatus() {
             setServerStatus('checking', `Checking ${apiBase}/health ...`);
             try {
@@ -649,15 +687,19 @@ Rules:
             try {
                 const status = await makeRequest('GET', '/v1/admin/tunnel/status');
                 if (status && status.status === 'running' && status.url) {
+                    setTunnelPublicUrl(status.url);
                     setTunnelStatus('online', `Running: ${status.url}`);
                     return;
                 }
                 if (status && status.status === 'stopped') {
+                    setTunnelPublicUrl(status.url || '');
                     setTunnelStatus('offline', 'Stopped');
                     return;
                 }
+                setTunnelPublicUrl('');
                 setTunnelStatus('offline', 'Not running');
             } catch (_) {
+                setTunnelPublicUrl('');
                 setTunnelStatus('offline', 'Cannot query tunnel status');
             }
         }
@@ -944,6 +986,7 @@ Rules:
 
                 if (response && response.url && navigator.clipboard && navigator.clipboard.writeText) {
                     await navigator.clipboard.writeText(response.url);
+                    setTunnelPublicUrl(response.url);
                     displayOutput('serverOutput', {
                         ...response,
                         copied_to_clipboard: true,
