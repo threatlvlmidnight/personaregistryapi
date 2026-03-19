@@ -1,0 +1,44 @@
+Metadata-Version: 2.4
+Name: persona-registry-api
+Version: 0.1.0
+Summary: Versioned persona registry API
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.116.0
+Requires-Dist: uvicorn>=0.35.0
+Requires-Dist: pydantic>=2.11.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3.0; extra == "dev"
+Requires-Dist: httpx>=0.28.0; extra == "dev"
+
+# Persona Registry API
+
+Initial implementation scaffold for the v1 design spec.
+
+## Run
+
+```bash
+pip install -e .
+uvicorn app.main:app --reload
+```
+
+## Test
+
+```bash
+pip install -e .[dev]
+pytest
+```
+
+## Implemented endpoints (initial)
+
+- `POST /v1/personas`
+- `POST /v1/personas:import`
+- `GET /v1/personas`
+- `GET /v1/personas/{id}`
+- `GET /v1/personas/{slug}/versions`
+- `GET /v1/personas/{slug}/versions/{version}`
+- `GET /v1/personas/{slug}/latest`
+- `PATCH /v1/personas/{id}` (draft only)
+- `POST /v1/personas/{id}:publish`
+- `POST /v1/personas/{id}:deprecate`
+- `POST /v1/personas/{id}:archive`

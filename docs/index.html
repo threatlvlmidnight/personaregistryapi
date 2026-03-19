@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Persona Registry API Tester</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+        
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        .section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h2 {
+            color: #333;
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            color: #555;
+            font-weight: 500;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: inherit;
+        }
+        
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        
+        button {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        button.secondary {
+            background: #6c757d;
+            margin-left: 10px;
+        }
+        
+        button.secondary:hover {
+            background: #545b62;
+        }
+        
+        .output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        
+        .success {
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        
+        .api-url {
+            font-size: 0.8em;
+            color: #6c757d;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .status-row {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.75rem;
+            border: 1px solid transparent;
+        }
+
+        .status-checking {
+            background: #fff3cd;
+            color: #856404;
+            border-color: #ffeeba;
+        }
+
+        .status-online {
+            background: #d4edda;
+            color: #155724;
+            border-color: #c3e6cb;
+        }
+
+        .status-offline {
+            background: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
+        
+        .wide {
+            grid-column: 1 / -1;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .button-group button {
+            flex: 1;
+            min-width: 120px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 Persona Registry API Tester</h1>
+        
+        <div class="api-url">
+            API Base URL: <strong id="apiBase">http://localhost:8000</strong>
+            <input type="text" id="apiBaseUrlInput" placeholder="http://localhost:8000" style="width: 300px; margin-left: 10px;">
+            <button onclick="updateApiBase()" style="margin-left: 5px;">Update</button>
+            <div class="status-row">
+                <span>Server Status:</span>
+                <span id="serverStatusBadge" class="status-badge status-checking">Checking</span>
+                <span id="serverStatusText">Awaiting health check...</span>
+            </div>
+        </div>
+
+        <div class="section" style="margin-bottom: 20px;">
+            <h2>Server Controls</h2>
+            <div class="button-group">
+                <button onclick="startServerFromUi()">Start Server</button>
+                <button class="secondary" onclick="reloadServerFromUi()">Reload Server</button>
+            </div>
+            <div id="serverOutput" class="output" style="display:none;"></div>
+        </div>
+        
+        <div class="layout">
+                        <div class="section wide">
+                                <h2>LLM JSON Helper</h2>
+
+                                <div class="form-group">
+                                        <label>Copyable Prompt for Any LLM</label>
+                                        <textarea id="llmPrompt" style="min-height: 220px;">Return ONLY valid JSON (no markdown, no explanation) using this exact shape:
+
+{
+    "personas": [
+        {
+            "id": "string_unique_id",
+            "slug": "lowercase-kebab-case",
+            "name": "display name",
+            "version": "MAJOR.MINOR.PATCH",
+            "summary": "short summary",
+            "knowledge_level": "low|medium|high",
+            "ai_attitude": "skeptical|neutral|optimistic",
+            "traits": ["string"],
+            "communication_style": ["string"],
+            "goals": ["string"],
+            "frustrations": ["string"],
+            "prompt_template": "string",
+            "usage_guidance": {
+                "best_for": ["string"],
+                "avoid_for": ["string"]
+            },
+            "tags": ["string"],
+            "status": "draft"
+        }
+    ]
+}
+
+Rules:
+1) status must be "draft" for import/create.
+2) slug must be lowercase kebab-case.
+3) version must be semver like 1.0.0.
+4) Ensure id is unique.
+5) Return JSON only.</textarea>
+                                </div>
+
+                                <div class="button-group" style="margin-bottom: 10px;">
+                                        <button type="button" onclick="copyLlmPrompt()">Copy Prompt</button>
+                                </div>
+
+                                <div id="llmPromptOutput" class="output" style="display:none;"></div>
+                        </div>
+
+                        <div class="section wide">
+                                <h2>Paste JSON Import</h2>
+
+                                <div class="form-group">
+                                        <label>Paste JSON (either { "personas": [...] } or just [...] )</label>
+                                        <textarea id="importJsonInput" style="min-height: 240px;" placeholder='{"personas":[{...}]}'></textarea>
+                                </div>
+
+                                <div class="button-group" style="margin-bottom: 10px;">
+                                        <button type="button" onclick="importPastedJson()">Import JSON</button>
+                                        <button class="secondary" type="button" onclick="clearImportJson()">Clear</button>
+                                </div>
+
+                                <div id="importJsonOutput" class="output" style="display:none;"></div>
+                        </div>
+
+            <!-- Personas Section -->
+            <div class="section">
+                <h2>Create Persona</h2>
+
+                <div class="form-group">
+                    <label>Mode</label>
+                    <select id="personaMode" onchange="setPersonaMode()">
+                        <option value="create" selected>Create</option>
+                        <option value="edit">Edit Draft</option>
+                    </select>
+                </div>
+
+                <div id="editPersonaControls" style="display:none;">
+                    <div class="form-group">
+                        <label>Select Persona</label>
+                        <select id="editPersonaSelect">
+                            <option value="">Select a persona...</option>
+                        </select>
+                    </div>
+                    <div class="button-group" style="margin-bottom: 10px;">
+                        <button type="button" onclick="loadDraftPersonaOptions()">Refresh Drafts</button>
+                        <button class="secondary" type="button" onclick="loadSelectedPersonaForEdit()">Load Selected</button>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Persona ID</label>
+                    <input type="text" id="personaId" placeholder="e.g., persona_arnold_v1" value="persona_arnold_v1">
+                </div>
+                
+                <div class="form-group">
+                    <label>Slug (lowercase, kebab-case)</label>
+                    <input type="text" id="personaSlug" placeholder="e.g., arnold-ai-skeptic" value="arnold-ai-skeptic">
+                </div>
+                
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="personaName" placeholder="Arnold" value="Arnold">
+                </div>
+                
+                <div class="form-group">
+                    <label>Version (MAJOR.MINOR.PATCH)</label>
+                    <input type="text" id="personaVersion" placeholder="1.0.0" value="1.0.0">
+                </div>
+                
+                <div class="form-group">
+                    <label>Summary</label>
+                    <textarea id="personaSummary" placeholder="Brief description..." value="Experienced business stakeholder who is skeptical of AI hype.">Experienced business stakeholder who is skeptical of AI hype.</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Knowledge Level</label>
+                    <select id="personaKnowledge">
+                        <option>low</option>
+                        <option selected>medium</option>
+                        <option>high</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>AI Attitude</label>
+                    <select id="personaAttitude">
+                        <option selected>skeptical</option>
+                        <option>neutral</option>
+                        <option>optimistic</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Prompt Template</label>
+                    <textarea id="personaPrompt" placeholder="Respond as Arnold...">Respond as Arnold, an AI skeptic who values evidence, clarity, and ROI...</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Traits (comma-separated)</label>
+                    <input type="text" id="personaTraits" value="practical, risk-aware">
+                </div>
+
+                <div class="form-group">
+                    <label>Communication Style (comma-separated)</label>
+                    <input type="text" id="personaCommunication" value="direct, low-jargon">
+                </div>
+
+                <div class="form-group">
+                    <label>Goals (comma-separated)</label>
+                    <input type="text" id="personaGoals" value="Understand real business value">
+                </div>
+
+                <div class="form-group">
+                    <label>Frustrations (comma-separated)</label>
+                    <input type="text" id="personaFrustrations" value="Buzzwords">
+                </div>
+
+                <div class="form-group">
+                    <label>Tags (comma-separated)</label>
+                    <input type="text" id="personaTags" value="skeptic, business">
+                </div>
+
+                <div class="form-group">
+                    <label>Usage Guidance - Best For (comma-separated)</label>
+                    <input type="text" id="personaBestFor" value="executive reviews">
+                </div>
+
+                <div class="form-group">
+                    <label>Usage Guidance - Avoid For (comma-separated)</label>
+                    <input type="text" id="personaAvoidFor" value="open brainstorming">
+                </div>
+                
+                <div class="button-group">
+                    <button id="personaSubmitBtn" onclick="submitPersonaForm()">Create Persona</button>
+                    <button class="secondary" onclick="clearPersonaForm()">Clear</button>
+                </div>
+                
+                <div id="createOutput" class="output" style="display:none;"></div>
+            </div>
+            
+            <!-- List & Query Section -->
+            <div class="section">
+                <h2>List & Query Personas</h2>
+                
+                <div class="form-group">
+                    <label>Filter by Slug (optional)</label>
+                    <input type="text" id="filterSlug" placeholder="Leave blank for all">
+                </div>
+                
+                <div class="form-group">
+                    <label>Filter by Status (optional)</label>
+                    <select id="filterStatus">
+                        <option value="">All</option>
+                        <option>draft</option>
+                        <option>active</option>
+                        <option>deprecated</option>
+                        <option>archived</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Search Query (optional)</label>
+                    <input type="text" id="filterQuery" placeholder="e.g., arnold">
+                </div>
+                
+                <div class="button-group">
+                    <button onclick="listPersonas()">List Personas</button>
+                    <button class="secondary" onclick="checkHealth()">Health Check</button>
+                </div>
+                
+                <div id="listOutput" class="output" style="display:none;"></div>
+            </div>
+            
+            <!-- Get & Manage Persona -->
+            <div class="section">
+                <h2>Manage Persona</h2>
+                
+                <div class="form-group">
+                    <label>Persona ID to Fetch</label>
+                    <input type="text" id="getPersonaId" placeholder="e.g., persona_arnold_v1">
+                </div>
+                
+                <button onclick="getPersona()">Get Persona by ID</button>
+                
+                <div id="getOutput" class="output" style="display:none;"></div>
+                
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+                
+                <h3 style="font-size: 1.1em; margin: 10px 0;">Lifecycle Actions</h3>
+
+                <div class="form-group">
+                    <label>Select Persona (recommended)</label>
+                    <select id="actionPersonaSelect">
+                        <option value="">Select a persona...</option>
+                    </select>
+                </div>
+
+                <div class="button-group" style="margin-bottom: 10px;">
+                    <button type="button" onclick="loadActionPersonaOptions()">Refresh Personas</button>
+                    <button class="secondary" type="button" onclick="useSelectedActionPersona()">Use Selected ID</button>
+                </div>
+                
+                <div class="form-group">
+                    <label>Persona ID for Action</label>
+                    <input type="text" id="actionPersonaId" placeholder="e.g., persona_arnold_v1">
+                </div>
+                
+                <div class="button-group">
+                    <button onclick="publishPersona()">Publish</button>
+                    <button class="secondary" onclick="deprecatePersona()">Deprecate</button>
+                    <button class="secondary" onclick="archivePersona()">Archive</button>
+                    <button class="secondary" onclick="deletePersona()">Delete</button>
+                </div>
+                
+                <div id="actionOutput" class="output" style="display:none;"></div>
+            </div>
+            
+            <!-- Rosters Section -->
+            <div class="section">
+                <h2>Create Roster</h2>
+                
+                <div class="form-group">
+                    <label>Roster ID</label>
+                    <input type="text" id="rosterId" placeholder="e.g., roster_exec_risk_v1" value="roster_exec_risk_v1">
+                </div>
+                
+                <div class="form-group">
+                    <label>Roster Name</label>
+                    <input type="text" id="rosterName" placeholder="e.g., Executive Risk Review" value="Executive Risk Review">
+                </div>
+                
+                <div class="form-group">
+                    <label>Persona Slug to Include</label>
+                    <input type="text" id="rosterPersonaSlug" placeholder="e.g., arnold-ai-skeptic" value="arnold-ai-skeptic">
+                </div>
+                
+                <div class="form-group">
+                    <label>Version Selector</label>
+                    <select id="rosterVersionSelector">
+                        <option selected>latest</option>
+                        <option>1.0.0</option>
+                        <option>1.1.0</option>
+                        <option>2.0.0</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Role</label>
+                    <input type="text" id="rosterRole" placeholder="e.g., primary_reviewer" value="primary_reviewer">
+                </div>
+                
+                <div class="button-group">
+                    <button onclick="createRoster()">Create Roster</button>
+                    <button class="secondary" onclick="listRosters()">List Rosters</button>
+                </div>
+                
+                <div id="rosterOutput" class="output" style="display:none;"></div>
+            </div>
+            
+            <!-- Evaluations Section -->
+            <div class="section">
+                <h2>Create Evaluation</h2>
+                
+                <div class="form-group">
+                    <label>Target Type</label>
+                    <select id="evalTargetType" onchange="updateEvalForm()">
+                        <option selected value="persona">Persona</option>
+                        <option value="roster">Roster</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="evalSlugGroup">
+                    <label>Persona Slug</label>
+                    <input type="text" id="evalSlug" placeholder="e.g., arnold-ai-skeptic" value="arnold-ai-skeptic">
+                </div>
+                
+                <div class="form-group" id="evalRosterGroup" style="display:none;">
+                    <label>Roster ID</label>
+                    <input type="text" id="evalRosterId" placeholder="e.g., roster_exec_risk_v1">
+                </div>
+                
+                <div class="form-group">
+                    <label>Task/Prompt</label>
+                    <input type="text" id="evalTask" placeholder="What should the persona evaluate?" value="Review this proposal for business risk">
+                </div>
+                
+                <div class="form-group">
+                    <label>Context (optional)</label>
+                    <textarea id="evalContext" placeholder="Additional context..."></textarea>
+                </div>
+                
+                <div class="button-group">
+                    <button onclick="createEvaluation()">Create Evaluation</button>
+                    <button class="secondary" onclick="clearEvalForm()">Clear</button>
+                </div>
+                
+                <div id="evalOutput" class="output" style="display:none;"></div>
+            </div>
+            
+            <!-- Compare Evaluations -->
+            <div class="section">
+                <h2>Compare Evaluations</h2>
+                
+                <div class="form-group">
+                    <label>Evaluation IDs (comma-separated)</label>
+                    <textarea id="evalIds" placeholder="eval_xxx1, eval_xxx2, eval_xxx3" style="min-height: 60px;"></textarea>
+                </div>
+                
+                <button onclick="compareEvaluations()">Compare</button>
+                
+                <div id="compareOutput" class="output" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let apiBase = 'http://localhost:8000';
+        let serverStatusIntervalId = null;
+        let currentEditingPersonaId = null;
+
+        function setServerStatus(state, text) {
+            const badge = document.getElementById('serverStatusBadge');
+            const statusText = document.getElementById('serverStatusText');
+            badge.classList.remove('status-checking', 'status-online', 'status-offline');
+            if (state === 'online') {
+                badge.classList.add('status-online');
+                badge.textContent = 'Online';
+            } else if (state === 'offline') {
+                badge.classList.add('status-offline');
+                badge.textContent = 'Offline';
+            } else {
+                badge.classList.add('status-checking');
+                badge.textContent = 'Checking';
+            }
+            statusText.textContent = text;
+        }
+
+        async function refreshServerStatus() {
+            setServerStatus('checking', `Checking ${apiBase}/health ...`);
+            try {
+                const response = await fetch(`${apiBase}/health`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (!response.ok) {
+                    setServerStatus('offline', `Health endpoint returned ${response.status}`);
+                    return;
+                }
+                const payload = await response.json();
+                if (payload && payload.status === 'ok') {
+                    setServerStatus('online', `Healthy at ${new Date().toLocaleTimeString()}`);
+                } else {
+                    setServerStatus('offline', 'Unexpected health response payload');
+                }
+            } catch (_) {
+                setServerStatus('offline', `Cannot reach ${apiBase}`);
+            }
+        }
+
+        function startServerStatusPolling() {
+            if (serverStatusIntervalId) {
+                clearInterval(serverStatusIntervalId);
+            }
+            refreshServerStatus();
+            serverStatusIntervalId = setInterval(refreshServerStatus, 5000);
+        }
+        
+        function updateApiBase() {
+            const input = document.getElementById('apiBaseUrlInput').value.trim();
+            if (input) {
+                apiBase = input;
+                document.getElementById('apiBase').textContent = apiBase;
+                refreshServerStatus();
+            }
+        }
+        
+        function displayOutput(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            if (isError) {
+                element.innerHTML = `<div class="error"><strong>Error:</strong>\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}</div>`;
+            } else {
+                element.innerHTML = `<div class="success"><strong>Success!</strong></div>\n${JSON.stringify(data, null, 2)}`;
+            }
+            element.style.display = 'block';
+        }
+
+        function parseCsv(inputValue) {
+            return inputValue
+                .split(',')
+                .map(item => item.trim())
+                .filter(item => item.length > 0);
+        }
+
+        function setPersonaIdentityEditable(isEditable) {
+            document.getElementById('personaId').disabled = !isEditable;
+            document.getElementById('personaSlug').disabled = !isEditable;
+            document.getElementById('personaVersion').disabled = !isEditable;
+        }
+
+        function setPersonaMode() {
+            const mode = document.getElementById('personaMode').value;
+            const isEdit = mode === 'edit';
+            document.getElementById('editPersonaControls').style.display = isEdit ? 'block' : 'none';
+            document.getElementById('personaSubmitBtn').textContent = isEdit ? 'Save Persona Changes' : 'Create Persona';
+            setPersonaIdentityEditable(!isEdit);
+            if (isEdit) {
+                loadDraftPersonaOptions();
+            } else {
+                currentEditingPersonaId = null;
+            }
+        }
+
+        async function loadActionPersonaOptions() {
+            try {
+                const data = await makeRequest('GET', '/v1/personas?limit=200');
+                const select = document.getElementById('actionPersonaSelect');
+                select.innerHTML = '<option value="">Select a persona...</option>';
+                for (const persona of data.items || []) {
+                    const option = document.createElement('option');
+                    option.value = persona.id;
+                    option.textContent = `${persona.name} (${persona.id}) [${persona.status}]`;
+                    select.appendChild(option);
+                }
+            } catch (error) {
+                displayOutput('actionOutput', error.message, true);
+            }
+        }
+
+        function useSelectedActionPersona() {
+            const selectedId = document.getElementById('actionPersonaSelect').value;
+            if (!selectedId) {
+                displayOutput('actionOutput', 'Select a persona first, then click Use Selected ID.', true);
+                return;
+            }
+            document.getElementById('actionPersonaId').value = selectedId;
+        }
+
+        function withNotFoundHint(errorMessage) {
+            if (typeof errorMessage === 'string' && errorMessage.includes('"code": "NOT_FOUND"')) {
+                return `${errorMessage}\n\nHint: use the persona picker above and click \"Use Selected ID\" to ensure the exact persona ID is used.`;
+            }
+            return errorMessage;
+        }
+
+        async function loadDraftPersonaOptions() {
+            try {
+                const data = await makeRequest('GET', '/v1/personas?limit=200');
+                const select = document.getElementById('editPersonaSelect');
+                select.innerHTML = '<option value="">Select a persona...</option>';
+                for (const persona of data.items || []) {
+                    const option = document.createElement('option');
+                    option.value = persona.id;
+                    option.textContent = `${persona.name} (${persona.id}) [${persona.status}]`;
+                    select.appendChild(option);
+                }
+                if (!data.items || data.items.length === 0) {
+                    displayOutput('createOutput', { message: 'No personas found yet. Create one first in Create mode.' });
+                }
+            } catch (error) {
+                displayOutput('createOutput', error.message, true);
+            }
+        }
+
+        function fillPersonaFormFromRecord(persona) {
+            document.getElementById('personaId').value = persona.id || '';
+            document.getElementById('personaSlug').value = persona.slug || '';
+            document.getElementById('personaName').value = persona.name || '';
+            document.getElementById('personaVersion').value = persona.version || '';
+            document.getElementById('personaSummary').value = persona.summary || '';
+            document.getElementById('personaKnowledge').value = persona.knowledge_level || 'medium';
+            document.getElementById('personaAttitude').value = persona.ai_attitude || 'neutral';
+            document.getElementById('personaPrompt').value = persona.prompt_template || '';
+            document.getElementById('personaTraits').value = (persona.traits || []).join(', ');
+            document.getElementById('personaCommunication').value = (persona.communication_style || []).join(', ');
+            document.getElementById('personaGoals').value = (persona.goals || []).join(', ');
+            document.getElementById('personaFrustrations').value = (persona.frustrations || []).join(', ');
+            document.getElementById('personaTags').value = (persona.tags || []).join(', ');
+            document.getElementById('personaBestFor').value = (persona.usage_guidance?.best_for || []).join(', ');
+            document.getElementById('personaAvoidFor').value = (persona.usage_guidance?.avoid_for || []).join(', ');
+        }
+
+        async function loadSelectedPersonaForEdit() {
+            try {
+                const selectedId = document.getElementById('editPersonaSelect').value;
+                if (!selectedId) {
+                    displayOutput('createOutput', 'Select a persona to edit.', true);
+                    return;
+                }
+                const persona = await makeRequest('GET', `/v1/personas/${selectedId}`);
+                currentEditingPersonaId = persona.id;
+                fillPersonaFormFromRecord(persona);
+                displayOutput('createOutput', { message: `Loaded ${persona.id} (${persona.status}) for editing. Note: only draft personas can be saved via update.` });
+            } catch (error) {
+                displayOutput('createOutput', error.message, true);
+            }
+        }
+        
+        function clearOutput(elementId) {
+            document.getElementById(elementId).style.display = 'none';
+        }
+
+        async function copyLlmPrompt() {
+            try {
+                const text = document.getElementById('llmPrompt').value;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    const area = document.getElementById('llmPrompt');
+                    area.focus();
+                    area.select();
+                    document.execCommand('copy');
+                }
+                displayOutput('llmPromptOutput', { message: 'Prompt copied to clipboard.' });
+            } catch (error) {
+                displayOutput('llmPromptOutput', `Copy failed: ${error.message}`, true);
+            }
+        }
+
+        function clearImportJson() {
+            document.getElementById('importJsonInput').value = '';
+            clearOutput('importJsonOutput');
+        }
+
+        async function importPastedJson() {
+            try {
+                const raw = document.getElementById('importJsonInput').value.trim();
+                if (!raw) {
+                    displayOutput('importJsonOutput', 'Paste JSON before importing.', true);
+                    return;
+                }
+
+                let parsed;
+                try {
+                    parsed = JSON.parse(raw);
+                } catch (parseError) {
+                    displayOutput('importJsonOutput', `Invalid JSON: ${parseError.message}`, true);
+                    return;
+                }
+
+                let payload;
+                if (Array.isArray(parsed)) {
+                    payload = { personas: parsed };
+                } else if (parsed && Array.isArray(parsed.personas)) {
+                    payload = parsed;
+                } else {
+                    displayOutput('importJsonOutput', 'JSON must be an array of personas or an object with a personas array.', true);
+                    return;
+                }
+
+                const result = await makeRequest('POST', '/v1/personas:import', payload);
+                displayOutput('importJsonOutput', result);
+                await loadDraftPersonaOptions();
+                await loadActionPersonaOptions();
+            } catch (error) {
+                displayOutput('importJsonOutput', error.message, true);
+            }
+        }
+
+        function showStartFallback() {
+            displayOutput('serverOutput', {
+                message: 'Server is offline. Start it from a terminal with: scripts\\start_server.cmd (from project root) or c:/Users/godda/personashare/.venv/Scripts/python.exe -m uvicorn app.main:app --reload'
+            }, true);
+        }
+        
+        async function makeRequest(method, endpoint, data = null) {
+            try {
+                const options = {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                };
+                
+                if (data) {
+                    options.body = JSON.stringify(data);
+                }
+                
+                const response = await fetch(`${apiBase}${endpoint}`, options);
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(JSON.stringify(errorData, null, 2));
+                }
+                
+                return await response.json();
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        async function startServerFromUi() {
+            try {
+                const health = await makeRequest('GET', '/health');
+                if (health.status === 'ok') {
+                    displayOutput('serverOutput', { message: 'Server is already running.' });
+                    refreshServerStatus();
+                    return;
+                }
+            } catch (_) {
+                showStartFallback();
+                refreshServerStatus();
+                return;
+            }
+
+            try {
+                const response = await makeRequest('POST', '/v1/admin/server/start');
+                displayOutput('serverOutput', response);
+                refreshServerStatus();
+            } catch (error) {
+                displayOutput('serverOutput', error.message, true);
+                refreshServerStatus();
+            }
+        }
+
+        async function reloadServerFromUi() {
+            try {
+                const response = await makeRequest('POST', '/v1/admin/server/reload');
+                displayOutput('serverOutput', response);
+                setTimeout(refreshServerStatus, 1200);
+            } catch (error) {
+                displayOutput('serverOutput', {
+                    message: 'Reload endpoint is unreachable because the API is offline. Start server first with scripts\\start_server.cmd, then use Reload Server. You can also run scripts\\reload_server.cmd manually.'
+                }, true);
+                refreshServerStatus();
+            }
+        }
+
+        setPersonaMode();
+        startServerStatusPolling();
+        loadActionPersonaOptions();
+        
+        // Health & List
+        async function checkHealth() {
+            try {
+                const data = await makeRequest('GET', '/health');
+                displayOutput('listOutput', data);
+            } catch (error) {
+                displayOutput('listOutput', error.message, true);
+            }
+        }
+        
+        async function listPersonas() {
+            try {
+                const slug = document.getElementById('filterSlug').value;
+                const status = document.getElementById('filterStatus').value;
+                const q = document.getElementById('filterQuery').value;
+                
+                let endpoint = '/v1/personas?limit=50';
+                if (slug) endpoint += `&slug=${encodeURIComponent(slug)}`;
+                if (status) endpoint += `&status=${encodeURIComponent(status)}`;
+                if (q) endpoint += `&q=${encodeURIComponent(q)}`;
+                
+                const data = await makeRequest('GET', endpoint);
+                displayOutput('listOutput', data);
+            } catch (error) {
+                displayOutput('listOutput', error.message, true);
+            }
+        }
+        
+        // Create Persona
+        function clearPersonaForm() {
+            document.getElementById('personaId').value = 'persona_arnold_v1';
+            document.getElementById('personaSlug').value = 'arnold-ai-skeptic';
+            document.getElementById('personaName').value = 'Arnold';
+            document.getElementById('personaVersion').value = '1.0.0';
+            document.getElementById('personaSummary').value = 'Experienced business stakeholder who is skeptical of AI hype.';
+            document.getElementById('personaKnowledge').value = 'medium';
+            document.getElementById('personaAttitude').value = 'skeptical';
+            document.getElementById('personaPrompt').value = 'Respond as Arnold, an AI skeptic who values evidence, clarity, and ROI...';
+            document.getElementById('personaTraits').value = 'practical, risk-aware';
+            document.getElementById('personaCommunication').value = 'direct, low-jargon';
+            document.getElementById('personaGoals').value = 'Understand real business value';
+            document.getElementById('personaFrustrations').value = 'Buzzwords';
+            document.getElementById('personaTags').value = 'skeptic, business';
+            document.getElementById('personaBestFor').value = 'executive reviews';
+            document.getElementById('personaAvoidFor').value = 'open brainstorming';
+            if (document.getElementById('personaMode').value === 'edit') {
+                currentEditingPersonaId = null;
+            }
+            clearOutput('createOutput');
+        }
+        
+        async function submitPersonaForm() {
+            try {
+                const mode = document.getElementById('personaMode').value;
+                const fullPayload = {
+                    id: document.getElementById('personaId').value,
+                    slug: document.getElementById('personaSlug').value,
+                    name: document.getElementById('personaName').value,
+                    version: document.getElementById('personaVersion').value,
+                    summary: document.getElementById('personaSummary').value,
+                    knowledge_level: document.getElementById('personaKnowledge').value,
+                    ai_attitude: document.getElementById('personaAttitude').value,
+                    traits: parseCsv(document.getElementById('personaTraits').value),
+                    communication_style: parseCsv(document.getElementById('personaCommunication').value),
+                    goals: parseCsv(document.getElementById('personaGoals').value),
+                    frustrations: parseCsv(document.getElementById('personaFrustrations').value),
+                    prompt_template: document.getElementById('personaPrompt').value,
+                    usage_guidance: {
+                        best_for: parseCsv(document.getElementById('personaBestFor').value),
+                        avoid_for: parseCsv(document.getElementById('personaAvoidFor').value),
+                    },
+                    tags: parseCsv(document.getElementById('personaTags').value),
+                    status: 'draft'
+                };
+
+                if (mode === 'edit') {
+                    const personaId = currentEditingPersonaId || document.getElementById('editPersonaSelect').value;
+                    if (!personaId) {
+                        displayOutput('createOutput', 'Select and load a draft persona before saving changes.', true);
+                        return;
+                    }
+                    const patchPayload = {
+                        name: fullPayload.name,
+                        summary: fullPayload.summary,
+                        knowledge_level: fullPayload.knowledge_level,
+                        ai_attitude: fullPayload.ai_attitude,
+                        traits: fullPayload.traits,
+                        communication_style: fullPayload.communication_style,
+                        goals: fullPayload.goals,
+                        frustrations: fullPayload.frustrations,
+                        prompt_template: fullPayload.prompt_template,
+                        usage_guidance: fullPayload.usage_guidance,
+                        tags: fullPayload.tags,
+                    };
+                    const updated = await makeRequest('PATCH', `/v1/personas/${personaId}`, patchPayload);
+                    displayOutput('createOutput', updated);
+                    await loadDraftPersonaOptions();
+                    return;
+                }
+
+                const created = await makeRequest('POST', '/v1/personas', fullPayload);
+                displayOutput('createOutput', created);
+            } catch (error) {
+                displayOutput('createOutput', error.message, true);
+            }
+        }
+        
+        // Get Persona
+        async function getPersona() {
+            try {
+                const personaId = document.getElementById('getPersonaId').value.trim();
+                if (!personaId) {
+                    displayOutput('getOutput', 'Please enter a Persona ID', true);
+                    return;
+                }
+                const data = await makeRequest('GET', `/v1/personas/${personaId}`);
+                displayOutput('getOutput', data);
+            } catch (error) {
+                displayOutput('getOutput', error.message, true);
+            }
+        }
+        
+        // Lifecycle Actions
+        async function validateLifecycleAction(personaId, action) {
+            const requiredByAction = {
+                publish: 'draft',
+                deprecate: 'active',
+                archive: 'deprecated',
+                delete: 'draft',
+            };
+            const required = requiredByAction[action];
+            const persona = await makeRequest('GET', `/v1/personas/${personaId}`);
+            if (persona.status !== required) {
+                displayOutput(
+                    'actionOutput',
+                    {
+                        error: 'INVALID_STATUS_TRANSITION',
+                        message: `Cannot ${action} persona from status "${persona.status}". Required status is "${required}".`,
+                        persona_id: personaId,
+                        current_status: persona.status,
+                        required_status: required,
+                        tip: 'Use Publish (draft -> active), Deprecate (active -> deprecated), Archive (deprecated -> archived).',
+                    },
+                    true
+                );
+                return null;
+            }
+            return persona;
+        }
+
+        async function publishPersona() {
+            try {
+                const personaId = document.getElementById('actionPersonaId').value.trim();
+                if (!personaId) {
+                    displayOutput('actionOutput', 'Please enter a Persona ID', true);
+                    return;
+                }
+                const validPersona = await validateLifecycleAction(personaId, 'publish');
+                if (!validPersona) {
+                    return;
+                }
+                const result = await makeRequest('POST', `/v1/personas/${personaId}:publish`, { actor: 'tester' });
+                displayOutput('actionOutput', result);
+            } catch (error) {
+                displayOutput('actionOutput', withNotFoundHint(error.message), true);
+            }
+        }
+        
+        async function deprecatePersona() {
+            try {
+                const personaId = document.getElementById('actionPersonaId').value.trim();
+                if (!personaId) {
+                    displayOutput('actionOutput', 'Please enter a Persona ID', true);
+                    return;
+                }
+                const validPersona = await validateLifecycleAction(personaId, 'deprecate');
+                if (!validPersona) {
+                    return;
+                }
+                const result = await makeRequest('POST', `/v1/personas/${personaId}:deprecate`, { actor: 'tester' });
+                displayOutput('actionOutput', result);
+            } catch (error) {
+                displayOutput('actionOutput', withNotFoundHint(error.message), true);
+            }
+        }
+        
+        async function archivePersona() {
+            try {
+                const personaId = document.getElementById('actionPersonaId').value.trim();
+                if (!personaId) {
+                    displayOutput('actionOutput', 'Please enter a Persona ID', true);
+                    return;
+                }
+                const validPersona = await validateLifecycleAction(personaId, 'archive');
+                if (!validPersona) {
+                    return;
+                }
+                const result = await makeRequest('POST', `/v1/personas/${personaId}:archive`, { actor: 'tester' });
+                displayOutput('actionOutput', result);
+            } catch (error) {
+                displayOutput('actionOutput', withNotFoundHint(error.message), true);
+            }
+        }
+
+        async function deletePersona() {
+            try {
+                const personaId = document.getElementById('actionPersonaId').value.trim();
+                if (!personaId) {
+                    displayOutput('actionOutput', 'Please enter a Persona ID', true);
+                    return;
+                }
+                const validPersona = await validateLifecycleAction(personaId, 'delete');
+                if (!validPersona) {
+                    return;
+                }
+                const confirmed = window.confirm(`Delete persona ${personaId}? Only draft personas can be deleted.`);
+                if (!confirmed) {
+                    return;
+                }
+                const result = await makeRequest('DELETE', `/v1/personas/${personaId}`);
+                displayOutput('actionOutput', result);
+                if (document.getElementById('personaMode').value === 'edit') {
+                    await loadDraftPersonaOptions();
+                }
+            } catch (error) {
+                displayOutput('actionOutput', withNotFoundHint(error.message), true);
+            }
+        }
+        
+        // Rosters
+        async function createRoster() {
+            try {
+                const data = {
+                    id: document.getElementById('rosterId').value,
+                    name: document.getElementById('rosterName').value,
+                    items: [
+                        {
+                            slug: document.getElementById('rosterPersonaSlug').value,
+                            version_selector: document.getElementById('rosterVersionSelector').value,
+                            role: document.getElementById('rosterRole').value,
+                            business_function: 'risk-review',
+                            task_type: 'evaluation'
+                        }
+                    ],
+                    tags: ['test']
+                };
+                
+                const result = await makeRequest('POST', '/v1/rosters', data);
+                displayOutput('rosterOutput', result);
+            } catch (error) {
+                displayOutput('rosterOutput', error.message, true);
+            }
+        }
+        
+        async function listRosters() {
+            try {
+                const data = await makeRequest('GET', '/v1/rosters');
+                displayOutput('rosterOutput', data);
+            } catch (error) {
+                displayOutput('rosterOutput', error.message, true);
+            }
+        }
+        
+        // Evaluations
+        function updateEvalForm() {
+            const targetType = document.getElementById('evalTargetType').value;
+            document.getElementById('evalSlugGroup').style.display = targetType === 'persona' ? 'block' : 'none';
+            document.getElementById('evalRosterGroup').style.display = targetType === 'roster' ? 'block' : 'none';
+        }
+        
+        function clearEvalForm() {
+            document.getElementById('evalTargetType').value = 'persona';
+            document.getElementById('evalSlug').value = 'arnold-ai-skeptic';
+            document.getElementById('evalRosterId').value = '';
+            document.getElementById('evalTask').value = 'Review this proposal for business risk';
+            document.getElementById('evalContext').value = '';
+            updateEvalForm();
+            clearOutput('evalOutput');
+        }
+        
+        async function createEvaluation() {
+            try {
+                const targetType = document.getElementById('evalTargetType').value;
+                const target = targetType === 'persona' 
+                    ? {
+                        type: 'persona',
+                        slug: document.getElementById('evalSlug').value,
+                        version_selector: 'latest'
+                    }
+                    : {
+                        type: 'roster',
+                        roster_id: document.getElementById('evalRosterId').value
+                    };
+                
+                const data = {
+                    target: target,
+                    input: {
+                        task: document.getElementById('evalTask').value,
+                        context: document.getElementById('evalContext').value || undefined
+                    },
+                    options: {
+                        record_transcript: true,
+                        max_tokens: 1200,
+                        scoring_mode: 'hybrid_weighted',
+                        weights: { automated: 0.6, human: 0.4 }
+                    }
+                };
+                
+                const result = await makeRequest('POST', '/v1/evaluations', data);
+                displayOutput('evalOutput', result);
+            } catch (error) {
+                displayOutput('evalOutput', error.message, true);
+            }
+        }
+        
+        async function compareEvaluations() {
+            try {
+                const evalIds = document.getElementById('evalIds').value
+                    .split(',')
+                    .map(id => id.trim())
+                    .filter(id => id);
+                
+                if (evalIds.length === 0) {
+                    displayOutput('compareOutput', 'Please enter at least one evaluation ID', true);
+                    return;
+                }
+                
+                const data = {
+                    evaluation_ids: evalIds
+                };
+                
+                const result = await makeRequest('POST', '/v1/evaluations:compare', data);
+                displayOutput('compareOutput', result);
+            } catch (error) {
+                displayOutput('compareOutput', error.message, true);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+app/main.py
+app/schemas.py
+app/store.py
+persona_registry_api.egg-info/PKG-INFO
+persona_registry_api.egg-info/SOURCES.txt
+persona_registry_api.egg-info/dependency_links.txt
+persona_registry_api.egg-info/requires.txt
+persona_registry_api.egg-info/top_level.txt
+tests/test_personas.py
