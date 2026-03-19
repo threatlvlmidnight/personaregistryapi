@@ -210,9 +210,14 @@
 
         <div class="section" style="margin-bottom: 20px;">
             <h2>Server Controls</h2>
+            <div class="form-group" style="margin-bottom: 10px;">
+                <label>Tunnel Target URL</label>
+                <input type="text" id="tunnelTargetUrl" placeholder="http://127.0.0.1:8000" value="http://127.0.0.1:8000">
+            </div>
             <div class="button-group">
                 <button onclick="startServerFromUi()">Start Server</button>
                 <button class="secondary" onclick="reloadServerFromUi()">Reload Server</button>
+                <button class="secondary" onclick="generateTunnelUrlFromUi()">Generate Cloudflare URL</button>
             </div>
             <div id="serverOutput" class="output" style="display:none;"></div>
         </div>
@@ -881,6 +886,26 @@ Rules:
                     message: 'Reload endpoint is unreachable because the API is offline. Start server first with scripts\\start_server.cmd, then use Reload Server. You can also run scripts\\reload_server.cmd manually.'
                 }, true);
                 refreshServerStatus();
+            }
+        }
+
+        async function generateTunnelUrlFromUi() {
+            try {
+                const targetInput = document.getElementById('tunnelTargetUrl').value.trim() || 'http://127.0.0.1:8000';
+                const endpoint = `/v1/admin/tunnel/start?target_url=${encodeURIComponent(targetInput)}`;
+                const response = await makeRequest('POST', endpoint);
+                displayOutput('serverOutput', response);
+
+                if (response && response.url && navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(response.url);
+                    displayOutput('serverOutput', {
+                        ...response,
+                        copied_to_clipboard: true,
+                        next_step: 'Share this URL with your user. It has been copied to clipboard.',
+                    });
+                }
+            } catch (error) {
+                displayOutput('serverOutput', error.message, true);
             }
         }
 

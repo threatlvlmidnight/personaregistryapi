@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import socket
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +35,9 @@ from app.schemas import (
     TransitionRequest,
 )
 from app.store import PersonaStore
+
+
+TRY_CLOUDFLARE_PATTERN = re.compile(r"https://[a-zA-Z0-9.-]+\.trycloudflare\.com")
 
 
 def api_error(status_code: int, code: str, message: str, details: dict | None = None) -> HTTPException:
@@ -78,11 +85,90 @@ def launch_server_process() -> None:
     )
 
 
+def resolve_cloudflared_path(explicit_path: str | None = None) -> str | None:
+    candidates: list[str] = []
+    if explicit_path:
+        candidates.append(explicit_path)
+
+    env_path = os.getenv("CLOUDFLARED_PATH")
+    if env_path:
+        candidates.append(env_path)
+
+    which_path = shutil.which("cloudflared")
+    if which_path:
+        candidates.append(which_path)
+
+    candidates.extend(
+        [
+            r"C:\Program Files\cloudflared\cloudflared.exe",
+            r"C:\Program Files (x86)\cloudflared\cloudflared.exe",
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return str(Path(candidate))
+    return None
+
+
+def _drain_process_output(process: subprocess.Popen[str]) -> None:
+    if process.stdout is None:
+        return
+    for _ in process.stdout:
+        pass
+
+
+def start_cloudflare_tunnel(target_url: str) -> dict[str, str | bool]:
+    cloudflared_path = resolve_cloudflared_path()
+    if not cloudflared_path:
+        raise ValueError("CLOUDFLARED_NOT_FOUND")
+
+    command = [cloudflared_path, "tunnel", "--url", target_url]
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(project_root()),
+    )
+
+    public_url = ""
+    deadline = time.time() + 20
+    while time.time() < deadline and process.poll() is None:
+        if process.stdout is None:
+            break
+        line = process.stdout.readline()
+        if not line:
+            continue
+        match = TRY_CLOUDFLARE_PATTERN.search(line)
+        if match:
+            public_url = match.group(0)
+            break
+
+    if not public_url:
+        process.terminate()
+        raise RuntimeError("CLOUDFLARE_URL_NOT_FOUND")
+
+    drain_thread = threading.Thread(target=_drain_process_output, args=(process,), daemon=True)
+    drain_thread.start()
+
+    return {
+        "ok": True,
+        "status": "started",
+        "url": public_url,
+        "target_url": target_url,
+    }
+
+
 def create_app(database_url: str | None = None) -> FastAPI:
     _, session_factory = create_session_factory(database_url)
     app = FastAPI(title="Persona Registry API", version="0.2.0")
     app.state.store = PersonaStore(session_factory)
     app.state.api_key = os.getenv("PERSONA_REGISTRY_API_KEY", "").strip()
+    app.state.tunnel_url = ""
+    app.state.tunnel_target_url = "http://127.0.0.1:8000"
 
     # Enable CORS for local development and testing
     app.add_middleware(
@@ -132,6 +218,38 @@ def create_app(database_url: str | None = None) -> FastAPI:
     def reload_server() -> dict[str, str | bool]:
         write_reload_trigger()
         return {"ok": True, "status": "reload_requested"}
+
+    @app.post("/v1/admin/tunnel/start")
+    def start_tunnel(request: Request, target_url: str = Query(default="http://127.0.0.1:8000")) -> dict[str, str | bool]:
+        try:
+            result = start_cloudflare_tunnel(target_url)
+            request.app.state.tunnel_url = result["url"]
+            request.app.state.tunnel_target_url = target_url
+            return {
+                "ok": True,
+                "status": "started",
+                "url": result["url"],
+                "target_url": target_url,
+            }
+        except ValueError as exc:
+            if str(exc) == "CLOUDFLARED_NOT_FOUND":
+                raise api_error(500, "CLOUDFLARED_NOT_FOUND", "Could not find cloudflared executable") from exc
+            raise api_error(500, "TUNNEL_START_FAILED", "Failed to start Cloudflare tunnel") from exc
+        except RuntimeError as exc:
+            if str(exc) == "CLOUDFLARE_URL_NOT_FOUND":
+                raise api_error(500, "CLOUDFLARE_URL_NOT_FOUND", "Tunnel started but no public URL was detected") from exc
+            raise api_error(500, "TUNNEL_START_FAILED", "Failed to start Cloudflare tunnel") from exc
+
+    @app.get("/v1/admin/tunnel/status")
+    def tunnel_status(request: Request) -> dict[str, str | bool]:
+        if request.app.state.tunnel_url:
+            return {
+                "ok": True,
+                "status": "known",
+                "url": request.app.state.tunnel_url,
+                "target_url": request.app.state.tunnel_target_url,
+            }
+        return {"ok": True, "status": "unknown", "url": "", "target_url": request.app.state.tunnel_target_url}
 
     @app.post("/v1/personas", response_model=PersonaRecord)
     def create_persona(request: Request, persona: PersonaCreate, created_by: str = Query(default="system")) -> PersonaRecord:
