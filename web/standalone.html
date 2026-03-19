@@ -86,15 +86,28 @@
 </head>
 <body>
 <div class="container">
-    <h1>🎭 Persona Registry — Standalone</h1>
+    <h1>🎭 Persona Registry — Hybrid Client</h1>
 
-    <!-- Local Mode Banner -->
+    <!-- Backend Mode Banner -->
     <div class="local-banner">
         <div class="stats">
-            <b>📦 Browser Storage Mode</b> — All data is saved locally in your browser. No server required.<br>
+            <b>🔌 Backend Mode</b>
+            <select id="backendMode" onchange="updateBackendMode()" style="width: 220px; margin-left: 8px; margin-right: 8px;">
+                <option value="local" selected>Browser Storage (Local)</option>
+                <option value="remote">Remote API (Cloudflare URL)</option>
+            </select>
+            <br>
+            <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <input type="text" id="remoteApiBase" placeholder="https://your-tunnel.trycloudflare.com" style="min-width: 360px; flex: 1;">
+                <input type="text" id="remoteApiKey" placeholder="Optional X-API-Key" style="min-width: 220px;">
+                <button type="button" onclick="testRemoteConnection()">Test</button>
+            </div>
+            <span style="font-size: 0.8em; color: #4f6f4f;">Tip: use the Cloudflare URL as-is, without /v1.</span>
+            <br>
             <span id="storageStats">Loading...</span>
         </div>
         <div class="actions">
+            <button type="button" onclick="createOfflineSnapshot()">📥 Create Offline Copy</button>
             <button onclick="exportAllData()">⬇ Export JSON</button>
             <button class="secondary" onclick="document.getElementById('importFileInput').click()">⬆ Import File</button>
             <button class="danger" onclick="clearAllData()">🗑 Clear All</button>
@@ -407,6 +420,7 @@ Rules:
 const PERSONA_KEY  = 'persona_registry_personas';
 const ROSTER_KEY   = 'persona_registry_rosters';
 const EVAL_KEY     = 'persona_registry_evaluations';
+const BACKEND_SETTINGS_KEY = 'persona_registry_backend_settings';
 
 // ─── Storage Helpers ─────────────────────────────────────────────────────────
 function load(key)       { return JSON.parse(localStorage.getItem(key) || '[]'); }
@@ -415,6 +429,118 @@ function persist(key, d) { localStorage.setItem(key, JSON.stringify(d)); }
 function getPersonas()  { return load(PERSONA_KEY); }
 function getRosters()   { return load(ROSTER_KEY); }
 function getEvals()     { return load(EVAL_KEY); }
+
+let backendMode = 'local';
+let remoteApiBase = '';
+let remoteApiKey = '';
+
+function getBackendSettings() {
+    const settings = JSON.parse(localStorage.getItem(BACKEND_SETTINGS_KEY) || '{}');
+    return {
+        mode: settings.mode || 'local',
+        apiBase: settings.apiBase || '',
+        apiKey: settings.apiKey || '',
+    };
+}
+
+function saveBackendSettings() {
+    localStorage.setItem(BACKEND_SETTINGS_KEY, JSON.stringify({
+        mode: backendMode,
+        apiBase: remoteApiBase,
+        apiKey: remoteApiKey,
+    }));
+}
+
+function isRemoteMode() {
+    return backendMode === 'remote';
+}
+
+function normalizeApiBase(value) {
+    return (value || '').trim().replace(/\/$/, '');
+}
+
+function getApiHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (remoteApiKey) {
+        headers['X-API-Key'] = remoteApiKey;
+    }
+    return headers;
+}
+
+async function makeApiRequest(method, endpoint, body = null) {
+    if (!remoteApiBase) {
+        throw new Error('Remote API URL is required in Remote API mode.');
+    }
+
+    const options = {
+        method,
+        headers: getApiHeaders(),
+    };
+    if (body !== null) {
+        options.body = JSON.stringify(body);
+    }
+
+    let response;
+    try {
+        response = await fetch(`${remoteApiBase}${endpoint}`, options);
+    } catch (error) {
+        throw new Error(`Could not reach ${remoteApiBase}. ${error.message}`);
+    }
+
+    const raw = await response.text();
+    let parsed = null;
+    try {
+        parsed = raw ? JSON.parse(raw) : null;
+    } catch (_) {
+        parsed = raw;
+    }
+
+    if (!response.ok) {
+        if (parsed) {
+            throw new Error(typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2));
+        }
+        throw new Error(`Request failed with status ${response.status}`);
+    }
+
+    return parsed;
+}
+
+function loadBackendSettingsToUi() {
+    const settings = getBackendSettings();
+    backendMode = settings.mode;
+    remoteApiBase = settings.apiBase;
+    remoteApiKey = settings.apiKey;
+
+    document.getElementById('backendMode').value = backendMode;
+    document.getElementById('remoteApiBase').value = remoteApiBase;
+    document.getElementById('remoteApiKey').value = remoteApiKey;
+}
+
+async function updateBackendMode() {
+    backendMode = document.getElementById('backendMode').value;
+    remoteApiBase = normalizeApiBase(document.getElementById('remoteApiBase').value);
+    remoteApiKey = document.getElementById('remoteApiKey').value.trim();
+    document.getElementById('remoteApiBase').value = remoteApiBase;
+    saveBackendSettings();
+    await loadDraftPersonaOptions();
+    await loadActionPersonaOptions();
+    await updateStorageStats();
+}
+
+async function testRemoteConnection() {
+    try {
+        backendMode = 'remote';
+        document.getElementById('backendMode').value = 'remote';
+        remoteApiBase = normalizeApiBase(document.getElementById('remoteApiBase').value);
+        remoteApiKey = document.getElementById('remoteApiKey').value.trim();
+        saveBackendSettings();
+        const health = await makeApiRequest('GET', '/health');
+        displayOutput('listOutput', { message: 'Remote API connection OK', health });
+        await updateStorageStats();
+    } catch (error) {
+        displayOutput('listOutput', error.message, true);
+    }
+}
 
 // ─── Error Helper ─────────────────────────────────────────────────────────────
 function storeError(code, detail) {
@@ -573,6 +699,134 @@ function ls_listEvals() {
     return { items, total: items.length };
 }
 
+async function listPersonasData(filters = {}) {
+    if (!isRemoteMode()) {
+        return ls_listPersonas(filters);
+    }
+    let endpoint = '/v1/personas?limit=200';
+    if (filters.slug) endpoint += `&slug=${encodeURIComponent(filters.slug)}`;
+    if (filters.status) endpoint += `&status=${encodeURIComponent(filters.status)}`;
+    if (filters.q) endpoint += `&q=${encodeURIComponent(filters.q)}`;
+    return await makeApiRequest('GET', endpoint);
+}
+
+async function getPersonaData(personaId) {
+    if (!isRemoteMode()) {
+        return ls_getPersona(personaId);
+    }
+    return await makeApiRequest('GET', `/v1/personas/${encodeURIComponent(personaId)}`);
+}
+
+async function createPersonaData(payload) {
+    if (!isRemoteMode()) {
+        return ls_createPersona(payload);
+    }
+    return await makeApiRequest('POST', '/v1/personas', payload);
+}
+
+async function updatePersonaData(personaId, patch) {
+    if (!isRemoteMode()) {
+        return ls_updatePersona(personaId, patch);
+    }
+    return await makeApiRequest('PATCH', `/v1/personas/${encodeURIComponent(personaId)}`, patch);
+}
+
+async function transitionPersonaData(personaId, action) {
+    if (!isRemoteMode()) {
+        return ls_transition(personaId, action);
+    }
+    return await makeApiRequest('POST', `/v1/personas/${encodeURIComponent(personaId)}:${action}`, { actor: 'web-ui' });
+}
+
+async function deletePersonaData(personaId) {
+    if (!isRemoteMode()) {
+        return ls_deletePersona(personaId);
+    }
+    return await makeApiRequest('DELETE', `/v1/personas/${encodeURIComponent(personaId)}`);
+}
+
+async function importPersonasData(payload) {
+    if (!isRemoteMode()) {
+        return ls_importPersonas(payload);
+    }
+    return await makeApiRequest('POST', '/v1/personas:import', payload);
+}
+
+async function createRosterData(payload) {
+    if (!isRemoteMode()) {
+        return ls_createRoster(payload);
+    }
+    return await makeApiRequest('POST', '/v1/rosters', payload);
+}
+
+async function listRostersData() {
+    if (!isRemoteMode()) {
+        return ls_listRosters();
+    }
+    return await makeApiRequest('GET', '/v1/rosters');
+}
+
+async function createEvaluationData(payload) {
+    if (!isRemoteMode()) {
+        return ls_createEval(payload);
+    }
+    return await makeApiRequest('POST', '/v1/evaluations', {
+        ...payload,
+        options: {
+            record_transcript: true,
+            max_tokens: 1200,
+            scoring_mode: 'hybrid_weighted',
+            weights: { automated: 0.6, human: 0.4 },
+        },
+    });
+}
+
+async function createOfflineSnapshot() {
+    if (!isRemoteMode()) {
+        alert('Switch to Remote API mode first, then click Create Offline Copy.');
+        return;
+    }
+
+    try {
+        const personasResult = await makeApiRequest('GET', '/v1/personas?limit=1000');
+        const rostersResult = await makeApiRequest('GET', '/v1/rosters');
+
+        const personas = Array.isArray(personasResult?.items) ? personasResult.items : [];
+        const rosters = Array.isArray(rostersResult?.items) ? rostersResult.items : [];
+
+        persist(PERSONA_KEY, personas);
+        persist(ROSTER_KEY, rosters);
+        persist(EVAL_KEY, getEvals());
+
+        const previousMode = backendMode;
+        backendMode = 'local';
+        document.getElementById('backendMode').value = 'local';
+        saveBackendSettings();
+
+        await loadDraftPersonaOptions();
+        await loadActionPersonaOptions();
+        await updateStorageStats();
+
+        displayOutput('listOutput', {
+            message: 'Offline copy created successfully.',
+            copied_from: remoteApiBase,
+            personas_copied: personas.length,
+            rosters_copied: rosters.length,
+            mode_switched_to: backendMode,
+            previous_mode: previousMode,
+        });
+    } catch (error) {
+        displayOutput('listOutput', `Failed to create offline copy: ${error.message}`, true);
+    }
+}
+
+async function listEvaluationsData() {
+    if (!isRemoteMode()) {
+        return ls_listEvals();
+    }
+    return { message: 'Listing evaluations is only available in local mode in this UI.' };
+}
+
 // ─── Export / Import / Clear ──────────────────────────────────────────────────
 function exportAllData() {
     const data = {
@@ -591,6 +845,11 @@ function exportAllData() {
 }
 
 function handleImportFile(event) {
+    if (isRemoteMode()) {
+        alert('File import only works in local mode. Use Paste JSON Import for remote mode.');
+        event.target.value = '';
+        return;
+    }
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -618,6 +877,10 @@ function handleImportFile(event) {
 }
 
 function clearAllData() {
+    if (isRemoteMode()) {
+        alert('Clear All only applies to local browser storage.');
+        return;
+    }
     if (!confirm('Clear ALL personas, rosters, and evaluations from browser storage? This cannot be undone.')) return;
     localStorage.removeItem(PERSONA_KEY);
     localStorage.removeItem(ROSTER_KEY);
@@ -628,7 +891,18 @@ function clearAllData() {
 }
 
 // ─── Storage Stats ────────────────────────────────────────────────────────────
-function updateStorageStats() {
+async function updateStorageStats() {
+    if (isRemoteMode()) {
+        try {
+            const health = await makeApiRequest('GET', '/health');
+            document.getElementById('storageStats').textContent =
+                `Remote API mode active at ${remoteApiBase || '(unset)'} · health: ${health?.status || 'unknown'}`;
+        } catch (_) {
+            document.getElementById('storageStats').textContent =
+                `Remote API mode active at ${remoteApiBase || '(unset)'} · health check failed`;
+        }
+        return;
+    }
     const p = getPersonas();
     const r = getRosters();
     const e = getEvals();
@@ -642,6 +916,14 @@ function updateStorageStats() {
 }
 
 function showStorageStats() {
+    if (isRemoteMode()) {
+        displayOutput('listOutput', {
+            mode: 'remote',
+            api_base: remoteApiBase,
+            message: 'Storage stats are local-mode only. In remote mode, data is on your API backend.',
+        });
+        return;
+    }
     displayOutput('listOutput', {
         personas:    getPersonas().length,
         rosters:     getRosters().length,
@@ -697,8 +979,14 @@ function setPersonaMode() {
     else currentEditingPersonaId = null;
 }
 
-function loadDraftPersonaOptions() {
-    const { items } = ls_listPersonas();
+async function loadDraftPersonaOptions() {
+    let items = [];
+    try {
+        const data = await listPersonasData();
+        items = data.items || [];
+    } catch (error) {
+        displayOutput('createOutput', error.message, true);
+    }
     const sel = document.getElementById('editPersonaSelect');
     sel.innerHTML = '<option value="">Select a persona...</option>';
     for (const p of items) {
@@ -709,8 +997,14 @@ function loadDraftPersonaOptions() {
     }
 }
 
-function loadActionPersonaOptions() {
-    const { items } = ls_listPersonas();
+async function loadActionPersonaOptions() {
+    let items = [];
+    try {
+        const data = await listPersonasData();
+        items = data.items || [];
+    } catch (error) {
+        displayOutput('actionOutput', error.message, true);
+    }
     const sel = document.getElementById('actionPersonaSelect');
     sel.innerHTML = '<option value="">Select a persona...</option>';
     for (const p of items) {
@@ -719,7 +1013,7 @@ function loadActionPersonaOptions() {
         opt.textContent = `${p.name} (${p.id}) [${p.status}]`;
         sel.appendChild(opt);
     }
-    updateStorageStats();
+    await updateStorageStats();
 }
 
 function useSelectedActionPersona() {
@@ -728,11 +1022,11 @@ function useSelectedActionPersona() {
     document.getElementById('actionPersonaId').value = id;
 }
 
-function loadSelectedPersonaForEdit() {
+async function loadSelectedPersonaForEdit() {
     const id = document.getElementById('editPersonaSelect').value;
     if (!id) { displayOutput('createOutput', 'Select a persona to edit.', true); return; }
     try {
-        const p = ls_getPersona(id);
+        const p = await getPersonaData(id);
         currentEditingPersonaId = p.id;
         fillPersonaFormFromRecord(p);
         displayOutput('createOutput', { message: `Loaded "${p.id}" [${p.status}] for editing.` });
@@ -778,7 +1072,7 @@ function clearImportJson() {
     clearOutputEl('importJsonOutput');
 }
 
-function importPastedJson() {
+async function importPastedJson() {
     const raw = document.getElementById('importJsonInput').value.trim();
     if (!raw) { displayOutput('importJsonOutput', 'Paste JSON before importing.', true); return; }
     let parsed;
@@ -791,10 +1085,14 @@ function importPastedJson() {
         displayOutput('importJsonOutput', 'JSON must be an array of personas or { "personas": [...] }.', true);
         return;
     }
-    const result = ls_importPersonas(payload);
-    displayOutput('importJsonOutput', result);
-    loadDraftPersonaOptions();
-    loadActionPersonaOptions();
+    try {
+        const result = await importPersonasData(payload);
+        displayOutput('importJsonOutput', result);
+        await loadDraftPersonaOptions();
+        await loadActionPersonaOptions();
+    } catch (error) {
+        displayOutput('importJsonOutput', error.message, true);
+    }
 }
 
 // ─── Persona CRUD UI ──────────────────────────────────────────────────────────
@@ -818,7 +1116,7 @@ function clearPersonaForm() {
     clearOutputEl('createOutput');
 }
 
-function submitPersonaForm() {
+async function submitPersonaForm() {
     const mode = document.getElementById('personaMode').value;
     const payload = {
         id:                document.getElementById('personaId').value,
@@ -849,41 +1147,45 @@ function submitPersonaForm() {
                 return;
             }
             const { id, slug, version, status, ...patch } = payload;
-            const updated = ls_updatePersona(personaId, patch);
+            const updated = await updatePersonaData(personaId, patch);
             displayOutput('createOutput', updated);
-            loadDraftPersonaOptions();
+            await loadDraftPersonaOptions();
         } else {
-            const created = ls_createPersona(payload);
+            const created = await createPersonaData(payload);
             displayOutput('createOutput', created);
-            loadActionPersonaOptions();
+            await loadActionPersonaOptions();
         }
-        updateStorageStats();
+        await updateStorageStats();
     } catch (err) {
         displayOutput('createOutput', fmtError(err), true);
     }
 }
 
 // ─── List & Get ───────────────────────────────────────────────────────────────
-function listPersonas() {
+async function listPersonas() {
     const slug   = document.getElementById('filterSlug').value;
     const status = document.getElementById('filterStatus').value;
     const q      = document.getElementById('filterQuery').value;
-    const result = ls_listPersonas({ slug: slug || undefined, status: status || undefined, q: q || undefined });
-    displayOutput('listOutput', result);
+    try {
+        const result = await listPersonasData({ slug: slug || undefined, status: status || undefined, q: q || undefined });
+        displayOutput('listOutput', result);
+    } catch (error) {
+        displayOutput('listOutput', error.message, true);
+    }
 }
 
-function getPersona() {
+async function getPersona() {
     const id = document.getElementById('getPersonaId').value.trim();
     if (!id) { displayOutput('getOutput', 'Enter a Persona ID.', true); return; }
-    try { displayOutput('getOutput', ls_getPersona(id)); }
+    try { displayOutput('getOutput', await getPersonaData(id)); }
     catch (err) { displayOutput('getOutput', fmtError(err), true); }
 }
 
 // ─── Lifecycle Pre-validation ─────────────────────────────────────────────────
-function validateLifecycleAction(personaId, action) {
+async function validateLifecycleAction(personaId, action) {
     const required = { publish: 'draft', deprecate: 'active', archive: 'deprecated', delete: 'draft' };
     let persona;
-    try { persona = ls_getPersona(personaId); }
+    try { persona = await getPersonaData(personaId); }
     catch (err) { displayOutput('actionOutput', fmtError(err), true); return null; }
     if (persona.status !== required[action]) {
         displayOutput('actionOutput', {
@@ -899,47 +1201,47 @@ function validateLifecycleAction(personaId, action) {
     return persona;
 }
 
-function publishPersona() {
+async function publishPersona() {
     const id = document.getElementById('actionPersonaId').value.trim();
     if (!id) { displayOutput('actionOutput', 'Enter a Persona ID.', true); return; }
-    if (!validateLifecycleAction(id, 'publish')) return;
-    try { displayOutput('actionOutput', ls_transition(id, 'publish')); updateStorageStats(); loadActionPersonaOptions(); }
+    if (!await validateLifecycleAction(id, 'publish')) return;
+    try { displayOutput('actionOutput', await transitionPersonaData(id, 'publish')); await updateStorageStats(); await loadActionPersonaOptions(); }
     catch (err) { displayOutput('actionOutput', withNotFoundHint(fmtError(err)), true); }
 }
 
-function deprecatePersona() {
+async function deprecatePersona() {
     const id = document.getElementById('actionPersonaId').value.trim();
     if (!id) { displayOutput('actionOutput', 'Enter a Persona ID.', true); return; }
-    if (!validateLifecycleAction(id, 'deprecate')) return;
-    try { displayOutput('actionOutput', ls_transition(id, 'deprecate')); updateStorageStats(); loadActionPersonaOptions(); }
+    if (!await validateLifecycleAction(id, 'deprecate')) return;
+    try { displayOutput('actionOutput', await transitionPersonaData(id, 'deprecate')); await updateStorageStats(); await loadActionPersonaOptions(); }
     catch (err) { displayOutput('actionOutput', withNotFoundHint(fmtError(err)), true); }
 }
 
-function archivePersona() {
+async function archivePersona() {
     const id = document.getElementById('actionPersonaId').value.trim();
     if (!id) { displayOutput('actionOutput', 'Enter a Persona ID.', true); return; }
-    if (!validateLifecycleAction(id, 'archive')) return;
-    try { displayOutput('actionOutput', ls_transition(id, 'archive')); updateStorageStats(); loadActionPersonaOptions(); }
+    if (!await validateLifecycleAction(id, 'archive')) return;
+    try { displayOutput('actionOutput', await transitionPersonaData(id, 'archive')); await updateStorageStats(); await loadActionPersonaOptions(); }
     catch (err) { displayOutput('actionOutput', withNotFoundHint(fmtError(err)), true); }
 }
 
-function deletePersona() {
+async function deletePersona() {
     const id = document.getElementById('actionPersonaId').value.trim();
     if (!id) { displayOutput('actionOutput', 'Enter a Persona ID.', true); return; }
-    if (!validateLifecycleAction(id, 'delete')) return;
+    if (!await validateLifecycleAction(id, 'delete')) return;
     if (!confirm(`Delete persona "${id}"? Only drafts can be deleted.`)) return;
     try {
-        displayOutput('actionOutput', ls_deletePersona(id));
-        updateStorageStats();
-        loadActionPersonaOptions();
-        if (document.getElementById('personaMode').value === 'edit') loadDraftPersonaOptions();
+        displayOutput('actionOutput', await deletePersonaData(id));
+        await updateStorageStats();
+        await loadActionPersonaOptions();
+        if (document.getElementById('personaMode').value === 'edit') await loadDraftPersonaOptions();
     } catch (err) {
         displayOutput('actionOutput', withNotFoundHint(fmtError(err)), true);
     }
 }
 
 // ─── Rosters ──────────────────────────────────────────────────────────────────
-function createRoster() {
+async function createRoster() {
     const data = {
         id:   document.getElementById('rosterId').value,
         name: document.getElementById('rosterName').value,
@@ -952,12 +1254,16 @@ function createRoster() {
         }],
         tags: ['standalone'],
     };
-    try { displayOutput('rosterOutput', ls_createRoster(data)); updateStorageStats(); }
+    try { displayOutput('rosterOutput', await createRosterData(data)); await updateStorageStats(); }
     catch (err) { displayOutput('rosterOutput', fmtError(err), true); }
 }
 
-function listRosters() {
-    displayOutput('rosterOutput', ls_listRosters());
+async function listRosters() {
+    try {
+        displayOutput('rosterOutput', await listRostersData());
+    } catch (error) {
+        displayOutput('rosterOutput', error.message, true);
+    }
 }
 
 // ─── Evaluations ──────────────────────────────────────────────────────────────
@@ -977,7 +1283,7 @@ function clearEvalForm() {
     clearOutputEl('evalOutput');
 }
 
-function createEvaluation() {
+async function createEvaluation() {
     const t = document.getElementById('evalTargetType').value;
     const data = {
         target: t === 'persona'
@@ -988,15 +1294,20 @@ function createEvaluation() {
             context: document.getElementById('evalContext').value || undefined,
         },
     };
-    try { displayOutput('evalOutput', ls_createEval(data)); updateStorageStats(); }
+    try { displayOutput('evalOutput', await createEvaluationData(data)); await updateStorageStats(); }
     catch (err) { displayOutput('evalOutput', fmtError(err), true); }
 }
 
-function listEvaluations() {
-    displayOutput('evalOutput', ls_listEvals());
+async function listEvaluations() {
+    try {
+        displayOutput('evalOutput', await listEvaluationsData());
+    } catch (error) {
+        displayOutput('evalOutput', error.message, true);
+    }
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
+loadBackendSettingsToUi();
 setPersonaMode();
 loadActionPersonaOptions();
 updateStorageStats();
