@@ -44,7 +44,24 @@ Tests create isolated SQLite databases per case so API behavior remains determin
 - `scripts\start_server.cmd` starts the API server using the project virtual environment.
 - `scripts\reload_server.cmd` triggers a reload by updating the reload trigger module.
 - `scripts\start_tunnel.py` starts a Cloudflare tunnel to your local API and prints the public URL.
-- The web test page includes **Start Server** and **Reload Server** buttons in the **Server Controls** section.
+- The web test page includes **Start Server**, **Reload Server**, **Generate Cloudflare URL**, and **Stop Tunnel** buttons in the **Server Controls** section.
+- The admin page also shows separate live badges for **Server Status** and **Tunnel Status**.
+- Generated tunnel URLs are shown in **Current Tunnel URL** and can be copied with **Copy URL**.
+
+## API Key (optional)
+
+If you want to protect all `/v1/*` endpoints with an API key:
+
+```bash
+set PERSONA_REGISTRY_API_KEY=your-secret-key
+uvicorn app.main:app --reload
+```
+
+Then clients must send header:
+
+```text
+X-API-Key: your-secret-key
+```
 
 ### Tunnel Helper
 
@@ -79,7 +96,15 @@ c:/Users/godda/personashare/.venv/Scripts/python.exe scripts/prepare_github_page
 4. Your UI URL will be:
 - `https://<your-github-username>.github.io/<your-repo-name>/`
 
-5. In the hosted UI, set **API Base URL** to your Cloudflare tunnel URL (`https://...trycloudflare.com`).
+5. In the hosted UI (`docs/index.html` hybrid client):
+- Set **Backend Mode** to `Remote API (Cloudflare URL)`.
+- Paste your tunnel URL (`https://...trycloudflare.com`) in the API URL field.
+- If API key is enabled, paste it in the API key input (`X-API-Key`).
+- Click **Test** and then use the page normally.
+
+6. Offline fallback in hosted UI:
+- Click **Create Offline Copy** to snapshot remote personas/rosters into browser local storage.
+- Switch back to local mode automatically if your tunnel/API goes offline.
 
 ## Implemented endpoints
 
