@@ -206,6 +206,11 @@
                 <span id="serverStatusBadge" class="status-badge status-checking">Checking</span>
                 <span id="serverStatusText">Awaiting health check...</span>
             </div>
+            <div class="status-row">
+                <span>Tunnel Status:</span>
+                <span id="tunnelStatusBadge" class="status-badge status-checking">Checking</span>
+                <span id="tunnelStatusText">Awaiting tunnel check...</span>
+            </div>
         </div>
 
         <div class="section" style="margin-bottom: 20px;">
@@ -218,6 +223,7 @@
                 <button onclick="startServerFromUi()">Start Server</button>
                 <button class="secondary" onclick="reloadServerFromUi()">Reload Server</button>
                 <button class="secondary" onclick="generateTunnelUrlFromUi()">Generate Cloudflare URL</button>
+                <button class="secondary" onclick="stopTunnelFromUi()">Stop Tunnel</button>
             </div>
             <div id="serverOutput" class="output" style="display:none;"></div>
         </div>
@@ -599,6 +605,23 @@ Rules:
             statusText.textContent = text;
         }
 
+        function setTunnelStatus(state, text) {
+            const badge = document.getElementById('tunnelStatusBadge');
+            const statusText = document.getElementById('tunnelStatusText');
+            badge.classList.remove('status-checking', 'status-online', 'status-offline');
+            if (state === 'online') {
+                badge.classList.add('status-online');
+                badge.textContent = 'Online';
+            } else if (state === 'offline') {
+                badge.classList.add('status-offline');
+                badge.textContent = 'Offline';
+            } else {
+                badge.classList.add('status-checking');
+                badge.textContent = 'Checking';
+            }
+            statusText.textContent = text;
+        }
+
         async function refreshServerStatus() {
             setServerStatus('checking', `Checking ${apiBase}/health ...`);
             try {
@@ -621,12 +644,35 @@ Rules:
             }
         }
 
+        async function refreshTunnelStatus() {
+            setTunnelStatus('checking', 'Checking tunnel status ...');
+            try {
+                const status = await makeRequest('GET', '/v1/admin/tunnel/status');
+                if (status && status.status === 'running' && status.url) {
+                    setTunnelStatus('online', `Running: ${status.url}`);
+                    return;
+                }
+                if (status && status.status === 'stopped') {
+                    setTunnelStatus('offline', 'Stopped');
+                    return;
+                }
+                setTunnelStatus('offline', 'Not running');
+            } catch (_) {
+                setTunnelStatus('offline', 'Cannot query tunnel status');
+            }
+        }
+
+        async function refreshSystemStatus() {
+            await refreshServerStatus();
+            await refreshTunnelStatus();
+        }
+
         function startServerStatusPolling() {
             if (serverStatusIntervalId) {
                 clearInterval(serverStatusIntervalId);
             }
-            refreshServerStatus();
-            serverStatusIntervalId = setInterval(refreshServerStatus, 5000);
+            refreshSystemStatus();
+            serverStatusIntervalId = setInterval(refreshSystemStatus, 5000);
         }
         
         function updateApiBase() {
@@ -634,7 +680,7 @@ Rules:
             if (input) {
                 apiBase = input;
                 document.getElementById('apiBase').textContent = apiBase;
-                refreshServerStatus();
+                refreshSystemStatus();
             }
         }
         
@@ -857,22 +903,22 @@ Rules:
                 const health = await makeRequest('GET', '/health');
                 if (health.status === 'ok') {
                     displayOutput('serverOutput', { message: 'Server is already running.' });
-                    refreshServerStatus();
+                    refreshSystemStatus();
                     return;
                 }
             } catch (_) {
                 showStartFallback();
-                refreshServerStatus();
+                refreshSystemStatus();
                 return;
             }
 
             try {
                 const response = await makeRequest('POST', '/v1/admin/server/start');
                 displayOutput('serverOutput', response);
-                refreshServerStatus();
+                refreshSystemStatus();
             } catch (error) {
                 displayOutput('serverOutput', error.message, true);
-                refreshServerStatus();
+                refreshSystemStatus();
             }
         }
 
@@ -880,12 +926,12 @@ Rules:
             try {
                 const response = await makeRequest('POST', '/v1/admin/server/reload');
                 displayOutput('serverOutput', response);
-                setTimeout(refreshServerStatus, 1200);
+                setTimeout(refreshSystemStatus, 1200);
             } catch (error) {
                 displayOutput('serverOutput', {
                     message: 'Reload endpoint is unreachable because the API is offline. Start server first with scripts\\start_server.cmd, then use Reload Server. You can also run scripts\\reload_server.cmd manually.'
                 }, true);
-                refreshServerStatus();
+                refreshSystemStatus();
             }
         }
 
@@ -904,8 +950,21 @@ Rules:
                         next_step: 'Share this URL with your user. It has been copied to clipboard.',
                     });
                 }
+                await refreshTunnelStatus();
             } catch (error) {
                 displayOutput('serverOutput', error.message, true);
+                await refreshTunnelStatus();
+            }
+        }
+
+        async function stopTunnelFromUi() {
+            try {
+                const response = await makeRequest('POST', '/v1/admin/tunnel/stop');
+                displayOutput('serverOutput', response);
+                await refreshTunnelStatus();
+            } catch (error) {
+                displayOutput('serverOutput', error.message, true);
+                await refreshTunnelStatus();
             }
         }
 

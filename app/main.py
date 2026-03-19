@@ -118,7 +118,7 @@ def _drain_process_output(process: subprocess.Popen[str]) -> None:
         pass
 
 
-def start_cloudflare_tunnel(target_url: str) -> dict[str, str | bool]:
+def start_cloudflare_tunnel(target_url: str) -> tuple[subprocess.Popen[str], str]:
     cloudflared_path = resolve_cloudflared_path()
     if not cloudflared_path:
         raise ValueError("CLOUDFLARED_NOT_FOUND")
@@ -154,12 +154,7 @@ def start_cloudflare_tunnel(target_url: str) -> dict[str, str | bool]:
     drain_thread = threading.Thread(target=_drain_process_output, args=(process,), daemon=True)
     drain_thread.start()
 
-    return {
-        "ok": True,
-        "status": "started",
-        "url": public_url,
-        "target_url": target_url,
-    }
+    return process, public_url
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -169,6 +164,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.state.api_key = os.getenv("PERSONA_REGISTRY_API_KEY", "").strip()
     app.state.tunnel_url = ""
     app.state.tunnel_target_url = "http://127.0.0.1:8000"
+    app.state.tunnel_process = None
 
     # Enable CORS for local development and testing
     app.add_middleware(
@@ -222,13 +218,23 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.post("/v1/admin/tunnel/start")
     def start_tunnel(request: Request, target_url: str = Query(default="http://127.0.0.1:8000")) -> dict[str, str | bool]:
         try:
-            result = start_cloudflare_tunnel(target_url)
-            request.app.state.tunnel_url = result["url"]
+            current_process = request.app.state.tunnel_process
+            if current_process is not None and current_process.poll() is None and request.app.state.tunnel_url:
+                return {
+                    "ok": True,
+                    "status": "already_running",
+                    "url": request.app.state.tunnel_url,
+                    "target_url": request.app.state.tunnel_target_url,
+                }
+
+            process, public_url = start_cloudflare_tunnel(target_url)
+            request.app.state.tunnel_process = process
+            request.app.state.tunnel_url = public_url
             request.app.state.tunnel_target_url = target_url
             return {
                 "ok": True,
                 "status": "started",
-                "url": result["url"],
+                "url": public_url,
                 "target_url": target_url,
             }
         except ValueError as exc:
@@ -240,16 +246,64 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 raise api_error(500, "CLOUDFLARE_URL_NOT_FOUND", "Tunnel started but no public URL was detected") from exc
             raise api_error(500, "TUNNEL_START_FAILED", "Failed to start Cloudflare tunnel") from exc
 
-    @app.get("/v1/admin/tunnel/status")
-    def tunnel_status(request: Request) -> dict[str, str | bool]:
-        if request.app.state.tunnel_url:
+    @app.post("/v1/admin/tunnel/stop")
+    def stop_tunnel(request: Request) -> dict[str, str | bool]:
+        process = request.app.state.tunnel_process
+        if process is None or process.poll() is not None:
+            request.app.state.tunnel_process = None
             return {
                 "ok": True,
-                "status": "known",
+                "status": "already_stopped",
                 "url": request.app.state.tunnel_url,
                 "target_url": request.app.state.tunnel_target_url,
             }
-        return {"ok": True, "status": "unknown", "url": "", "target_url": request.app.state.tunnel_target_url}
+
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+        request.app.state.tunnel_process = None
+        request.app.state.tunnel_url = ""
+        return {
+            "ok": True,
+            "status": "stopped",
+            "url": "",
+            "target_url": request.app.state.tunnel_target_url,
+        }
+
+    @app.get("/v1/admin/tunnel/status")
+    def tunnel_status(request: Request) -> dict[str, str | bool]:
+        process = request.app.state.tunnel_process
+        is_running = bool(process is not None and process.poll() is None)
+
+        if is_running and request.app.state.tunnel_url:
+            return {
+                "ok": True,
+                "status": "running",
+                "url": request.app.state.tunnel_url,
+                "target_url": request.app.state.tunnel_target_url,
+                "running": True,
+            }
+
+        if request.app.state.tunnel_url:
+            return {
+                "ok": True,
+                "status": "stopped",
+                "url": request.app.state.tunnel_url,
+                "target_url": request.app.state.tunnel_target_url,
+                "running": False,
+            }
+
+        return {
+            "ok": True,
+            "status": "unknown",
+            "url": "",
+            "target_url": request.app.state.tunnel_target_url,
+            "running": False,
+        }
 
     @app.post("/v1/personas", response_model=PersonaRecord)
     def create_persona(request: Request, persona: PersonaCreate, created_by: str = Query(default="system")) -> PersonaRecord:
